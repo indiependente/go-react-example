@@ -6,5 +6,5 @@
 client/node_modules
 
 # Builds
-client/dist/
+#client/dist/
 service
