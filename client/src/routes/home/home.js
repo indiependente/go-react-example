@@ -31,7 +31,7 @@ class Home extends React.Component {
     render() {
         return (
             <div>
-                <p style='font-family: Roboto'>
+                <p style={{ fontFamily: 'system-ui' }}>
                     Hello {this.state.name}!
                 </p>
             </div >
