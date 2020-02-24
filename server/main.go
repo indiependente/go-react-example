@@ -1,20 +1,14 @@
 package main
 
 import (
-	"context"
-	"encoding/json"
-	"fmt"
+	"log"
 	"net/http"
-	"os"
 
 	rice "github.com/GeertJohan/go.rice"
-	"github.com/go-openapi/strfmt"
 	"github.com/google/uuid"
-	"github.com/indiependente/pkg/logger"
-	"golang.org/x/sync/errgroup"
+	"github.com/labstack/echo"
+	"github.com/labstack/echo/middleware"
 )
-
-const serviceName = `backend`
 
 type Message struct {
 	Text string `json:"text"`
@@ -22,53 +16,36 @@ type Message struct {
 
 func main() {
 	//ctx := context.Background()
-	logger := logger.GetLoggerString(serviceName, os.Getenv("LOG_LEVEL"))
-	if err := run(logger); err != nil {
-		logger.Fatal("Error while running", err)
+	//logger := logger.GetLoggerString(serviceName, os.Getenv("LOG_LEVEL"))
+	if err := run(); err != nil {
+		log.Fatalf("Error while running: %s", err)
 	}
 }
 
-func run(logger logger.Logger) error {
-	box, err := rice.FindBox("../client/dist")
-	if err != nil {
-		return fmt.Errorf("error opening rice.Box: %w", err)
-	}
+func run() error {
+	e := echo.New()
+	//e.AutoTLSManager.Cache = autocert.DirCache("/var/www/.cache")
+	e.Use(middleware.Logger())
+	e.Use(middleware.Gzip())
+	e.Use(middleware.RequestIDWithConfig(middleware.RequestIDConfig{
+		Generator: func() string {
+			return uuid.New().String()
+		},
+	}))
 
-	http.Handle("/", http.FileServer(box.HTTPBox()))
-
-	http.HandleFunc("/hello", requestIDMiddleware(sendMessage(logger)))
-
-	eg := errgroup.Group{}
-	eg.Go(func() error {
-		return http.ListenAndServe(":8000", nil)
-	})
-
-	return eg.Wait()
+	assetHandler := http.FileServer(rice.MustFindBox("../client/dist").HTTPBox())
+	// the file server serves the index.html from the rice box
+	e.GET("/", echo.WrapHandler(assetHandler))
+	// servers other static files
+	e.GET("/*", echo.WrapHandler(http.StripPrefix("/", assetHandler)))
+	e.GET("/hello", sendMessage())
+	return e.Start(":8000")
+	//return e.StartAutoTLS(":443")
 }
 
-func sendMessage(logger logger.Logger) http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
-		id, _ := r.Context().Value("reqID").(string)
-		logger.RequestID(strfmt.UUID(id)).Info("incoming request from " + r.UserAgent())
-
+func sendMessage() echo.HandlerFunc {
+	return func(c echo.Context) error {
 		message := Message{"John Smith"}
-		data, err := json.Marshal(message)
-		if err != nil {
-			http.Error(w, err.Error(), http.StatusInternalServerError)
-			return
-		}
-
-		w.Header().Set("Content-Type", "application/json")
-
-		_, _ = w.Write(data)
-	}
-}
-
-func requestIDMiddleware(next http.Handler) http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
-		uuid := uuid.New()
-		ctx := context.WithValue(context.Background(), "reqID", uuid.String())
-		r = r.WithContext(ctx)
-		next.ServeHTTP(w, r)
+		return c.JSON(200, message)
 	}
 }
